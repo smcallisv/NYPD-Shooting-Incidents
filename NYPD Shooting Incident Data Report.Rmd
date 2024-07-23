@@ -1,0 +1,167 @@
+---
+title: "NYPD Shooting Incident Data Report"
+author: "Stuart McAllister"
+date: "2024-05-31"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, message=FALSE}
+# Load relevant libraries for analysis project
+library(tidyverse)
+library(magrittr)
+```
+
+# Project Step 1: Import Relevant Dataset
+
+```{r read_in_data}
+# Download and read in the csv file provided by the NYC OpenData
+# website related to historic shooting incidents in New York City
+# from 2006-2023
+
+url_NYPD <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+shooting_data <- read_csv(url_NYPD)
+
+# Take an initial view of imported dataset
+shooting_data
+
+# Create a summary view of the dataset to observe for significant missing
+# data that could affect later anaylsis
+summary(is.na(shooting_data))
+```
+
+# Project Step 2: Tidy and Transform Data
+
+Using the initial view of the dataset, along with summary of NA values to indicate missing data there are a few things that can be done to tidy the dataset. The goal is to put it in a form that allows for ease of use and analysis. The following changes will be made:
+
+1. Currently the OCCUR_DATE observations are in a character format which makes it difficult for using to analyze or create visualizations in this project. I will use the lubridate parse function 'mdy' to convert these to a date format.
+2. Next there are a number of columns of data that we will not use for this analysis project. Apart from BORO I will not use any of the location or location description information. It is worth noting that much of the descriptive location data is missing from the dataset anyway, which makes it less useful for comparison.
+3. It is also clear from the NA data summary that a large percentage of the perpetrator data is missing from the dataset. This makes sense in that it is more likely to recognize an incident from its 'aftermath' (ie. the victim) than from the perpetrator. For this reason the perpetrator data will be removed, and we will focus on the incidents from the victim's perspective.
+4. The VIC_AGE_GROUP is currently a character type, but is divided into specific categories and as such I will convert it to a factor type. At the same time there appears to be one entry for VIC_AGE_GROUP that does not fit with the other categories of this data, and so I will lump this one outlier with the other unknown values using fct_lump.
+5. Each incident is registered to a specific date in the dataset, but there is some analysis that requires consolidating the incidents on an annual basis. I will create a new column which extracts the 'year' value only from each date.
+
+```{r tidy_data}
+shooting_data <- shooting_data %>% 
+    mutate(OCCUR_DATE = mdy(OCCUR_DATE)) %>% 
+    subset(select = -c(LOC_OF_OCCUR_DESC:LOCATION_DESC,
+                       PERP_AGE_GROUP:PERP_RACE, X_COORD_CD:Lon_Lat)) %>% 
+    filter(!is.na(VIC_AGE_GROUP)) %>% 
+    mutate(VIC_AGE_GROUP = fct_lump(VIC_AGE_GROUP, n = 5))
+
+# Create a new column called YEAR which extracts only the year value from
+# each incident's date
+shooting_data$YEAR <- format(shooting_data$OCCUR_DATE, format = "%Y")
+
+# Print another view of the dataset after modifications
+shooting_data
+```
+
+# Project Step 3: Visualization and Analysis
+
+To begin with, I would like to see if there are differences in the number of incidents over the years 2006-2023, based on geographical location within the city of New York. I will create a bar chart of total number of registered incidents for each of the 5 boroughs of New York from the dataset. 
+
+```{r plot_total_borough}
+
+# Create a bar chart of total shooting incidents per borough for 2006-2023.
+shooting_data %>% 
+    ggplot(aes(x = BORO)) +
+      geom_bar(aes(fill = BORO), show.legend = FALSE) +
+      labs(title = 'New York Shooting Incidents by Borough 2006-2023', x = 
+             'Borough', y = 'Total Shooting Incidents') +
+      theme_bw()
+
+```
+
+It appears that there are significantly more shootings in Brooklyn followed by the Bronx based on the data presented. In comparison, Staten Island has seen a total of less than 10% of the total experienced in Brooklyn. 
+
+Further to this I would like to see if there are general trends based over time for shooting incidents in New York City. I will use the total incidents grouped by year to create a line chart that shows the tendencies over the timeframe of the dataset.
+
+
+```{r plot_annual_shootings}
+
+# Group the shooting incidents by year and summarise with the variable
+# total_shootings per year
+incidents_per_year <- shooting_data %>% 
+    group_by(YEAR) %>% 
+    summarise(total_shootings = n())
+
+# Create a line chart showing the changes in shooting incidents over
+# the years of the dataset
+    ggplot(data = incidents_per_year,
+           aes(x = YEAR, y = total_shootings, group = 1)) +
+        geom_line() +
+        labs(title = 'New York Shooting Incidents by Year 2006-2023',
+                    x = 'Year', y = 'Total Shooting Incidents') +
+        theme_bw()
+    
+```
+
+There appears to be a fairly steady decline of shooting incidents from the beginning of the dataset in 2006 until 2019. Then we can see a dramatic increase in shootings from 2019 until a peak amount in 2021. It appears that shootings more than doubled in than two year period, after which we see another period of decline.
+
+This visualization leads me to want to further understand this trend in 2020. Was it related to the chaos created in the entire world due to the COVID-19 pandemic? Where there other societal pressures, eg. race relations, economic stability, government policies, etc? Was there less police presence due to involvement as first responders for pandemic situations? Are these trends similar in other large US or World cities? All of these could be further investigated, using related data to compare trends and look for correlations.
+
+Combining the previous two visualizations, I would like to see if this spike in 2020 is correlated with different geographic locations in New York City. I will group the incidents by year and by borough, and create a line chart to show the incident trends over time in each of the 5 boroughs.
+
+```{r plot_annual_shootings_per_borough }
+
+# Group the shooting dataset by both year and borough and summarize to see
+# total shootings per borough
+incidents_by_year_boro <-shooting_data %>%
+        group_by(YEAR, BORO) %>%
+        summarise(total_shootings = n())
+
+# Create a line chart based on annual shootings per borough over time
+        ggplot(incidents_by_year_boro, 
+               aes(x = YEAR, y = total_shootings, group = BORO)) +
+          geom_line(aes(color = BORO)) +
+# Reduce the number of labels on the x-axis for clarity
+          scale_x_discrete(breaks = seq(2006, 2024, 2)) +
+          labs(title = "Annual Shooting Incidents by New York Borough 2006-2023",
+               x = 'Year', y = 'Total Shooting Incidents', color = 'Borough') +
+          theme_bw()
+```
+
+From the visualization there appears to be a fairly noticeable spike in shooting incidents in at least 4 of the 5 boroughs in 2020, which lines up with the overall yearly trends for the entire city. A statistical analysis could verify these results, but the trends seem to be apparent. On the other hand Staten Island seems to remain relatively flat. Are there characteristics of this borough that make it less propense to shooting incidents? Where there factors in 2020 and 2021 that were more impactful in the other boroughs? These are areas that could be studied with further data.
+
+Finally, I would like to look at the age demographics of the victims involved in shooting incidents in the dataset. I will create a bar chart divided by age group category to see if there are any apparent trends or characteristics.
+
+```{r plot_victim_age}
+
+# Create a bar chart of incidents divided by age category
+      ggplot(shooting_data, aes(x=VIC_AGE_GROUP)) +
+          geom_bar(aes(fill = VIC_AGE_GROUP), show.legend = FALSE) +
+          labs(title = 'New York Shooting Incidents by Victim\'s Age Category 2006-2023', x = 'Age Category', y = 'Total Shooting Incidents') +
+          theme_bw()
+```
+
+A significant amount of shooting victims can be seen in the age ranges of 18-25 and 25-44, as compared to age groups above and below this amount. Further investigation could help to explain these trends, as well as if they relate to other aspects identified - geographic disparity, spike in incidents around 2020-2021. Are there other demographic or societal factors that contribute to the large percentage of victims being in this age range? Could this be used to speak to causal aspects?
+
+
+# Project Step 4: Conclusion and Bias Identification
+
+The NYPD Historical Shooting Incident dataset provides a glimpse into the aspects of gun violence that play a role in many, if not most of the world's large metropolitan areas. Because of the population size of New York City, it can be easier to see trends and patterns, simply due to the quantity of incidents. From initial analysis, there seem to be patterns in New York's gun violence related to demographics, geography, and time.
+
+As with most investigations, some questions may be answered immediately, but often the analysis simply leads to further opportunities to dive deeper. From this initial analysis I can see the following as further areas of investigation:
+
+1. How does New York City's shooting incident patterns compare with those of other large US cities and/or comparable world cities?
+2. What are the factors that influenced a rapid increase in shooting incidents in 2020-2021 compared with a general downward trend seen in the dataset?
+3. Why are young adults more commonly the victims of shooting incidents in New York City?
+4. What are the factors that influence different shooting incident patterns within the geographical areas of New York City, and how can this information be useful for identifying potential similar areas in other urban centers?
+
+### Bias Identification
+
+We all grow up in a context which shapes the way that we interpret the world around us is. It is important to identify some of the biases that might influence the analysis and interpretation of the data that we are given to work with. Here are some of the biases that I identify in this project, and how i tried to deal with them:
+
+1. I purposely left out racial characteristics when sorting and visualizing the data. There is a general preconception that a correlation exists between race and crime and/or gun violence. This can be a divisive topic and as such I wanted to look at the data without the influence of race. In doing so it is possible that I might be filtering some important insights into the questions of difference in location and age demographic. Any further analysis would need to keep this in mind so as not to lead the investigation based on preconceived notions.
+2. There is a significant amount of data missing, especially in terms of the perpetrators of the shooting incidents. I decided to filter this out to focus on the victims, but there could be some important trends or insights to be learned even with the limited perpetrator information. If handled carefully, this information could be incorporated into further study.
+3. I have a limited knowledge of New York City, which can both complicate the analysis of the dataset and also help to keep a neutral perspective when approaching the observed data. Some prior knowledge of the information being analyzed could be useful to create a path for research, as long as it doesn't create preconceptions.
+4. I am working under the assumption that the people that are recording this data are doing it without their own biases. On a large sample like this, that may be a fair assumption, but that doesn't mean that there aren't influences of bias in the data itself in how crimes are categorized or classified.
+
+```{r sessionInfo}
+sessionInfo()
+
+```
+
